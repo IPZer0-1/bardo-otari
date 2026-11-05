@@ -42,7 +42,8 @@ ${sections}`;
 export async function selectRelevantDocs(
   docs: CampaignDoc[],
   question: string,
-  provider: LlmProvider
+  provider: LlmProvider,
+  endUserId?: string
 ): Promise<CampaignDoc[] | null> {
   // Con pocos docs no vale la pena clasificar
   if (docs.length <= 4) return docs;
@@ -65,6 +66,8 @@ Devuelve SOLO un array JSON con los file_paths de los documentos necesarios para
       system: "",
       messages: [{ role: "user", content: prompt }],
       maxTokens: 256,
+      endUserId,
+      tag: "query_router",
     });
 
     const match = response.text.match(/\[[\s\S]*\]/);
@@ -109,7 +112,7 @@ export async function selectRelevantDocsForIngest(
   docs: CampaignDoc[],
   notes: string,
   provider: LlmProvider,
-  opts?: { anchors?: string[] }
+  opts?: { anchors?: string[]; endUserId?: string }
 ): Promise<IngestRouterResult | null> {
   if (docs.length <= 3) return null;
 
@@ -140,6 +143,8 @@ Devuelve SOLO un array JSON con los file_paths de los documentos existentes que 
       system: "",
       messages: [{ role: "user", content: prompt }],
       maxTokens: 256,
+      endUserId: opts?.endUserId,
+      tag: "ingest_router",
     });
 
     const match = response.text.match(/\[[\s\S]*\]/);
@@ -379,10 +384,12 @@ export async function ingestNotes(
   docs: CampaignDoc[],
   notes: string,
   metadata?: IngestPromptMetadata,
-  provider: LlmProvider = "anthropic"
+  provider: LlmProvider = "anthropic",
+  endUserId?: string
 ): Promise<IngestResult> {
   const router = await selectRelevantDocsForIngest(docs, notes, provider, {
     anchors: INGEST_SESSION_ANCHOR_DOCS,
+    endUserId,
   });
   const docsForPrompt = router?.docs ?? docs;
   if (router) {
@@ -407,6 +414,8 @@ export async function ingestNotes(
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 8000,
+    endUserId,
+    tag: tier === "haiku" ? "ingest_short" : "ingest_long",
   });
   const result = parseIngestResponse(response.text || "{}", docs);
   return {
@@ -446,9 +455,10 @@ export async function ingestCorrection(
   docs: CampaignDoc[],
   notes: string,
   metadata?: IngestPromptMetadata,
-  provider: LlmProvider = "anthropic"
+  provider: LlmProvider = "anthropic",
+  endUserId?: string
 ): Promise<IngestResult> {
-  const router = await selectRelevantDocsForIngest(docs, notes, provider);
+  const router = await selectRelevantDocsForIngest(docs, notes, provider, { endUserId });
   const docsForPrompt = router?.docs ?? docs;
   if (router) {
     console.log(
@@ -469,6 +479,8 @@ export async function ingestCorrection(
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 2000,
+    endUserId,
+    tag: "ingest_correction",
   });
 
   // parseIngestResponse necesita la lista COMPLETA de docs para aplicar
@@ -586,7 +598,8 @@ const RECENT_MESSAGES_COUNT = 4; // Mensajes recientes que se envían completos
 
 async function summarizeHistory(
   messages: { role: "user" | "assistant"; content: string }[],
-  provider: LlmProvider
+  provider: LlmProvider,
+  endUserId?: string
 ): Promise<string> {
   const transcript = messages
     .map((m) => `${m.role === "user" ? "Jugador" : "Asistente"}: ${m.content}`)
@@ -603,6 +616,8 @@ async function summarizeHistory(
       },
     ],
     maxTokens: 300,
+    endUserId,
+    tag: "history_summary",
   });
 
   return response.text;
@@ -614,7 +629,8 @@ async function summarizeHistory(
  */
 export async function prepareHistory(
   messages: { role: "user" | "assistant"; content: string }[],
-  provider: LlmProvider
+  provider: LlmProvider,
+  endUserId?: string
 ): Promise<{ role: "user" | "assistant"; content: string }[]> {
   if (messages.length <= SUMMARY_THRESHOLD) {
     return messages;
@@ -623,7 +639,7 @@ export async function prepareHistory(
   const oldMessages = messages.slice(0, -RECENT_MESSAGES_COUNT);
   const recentMessages = messages.slice(-RECENT_MESSAGES_COUNT);
 
-  const summary = await summarizeHistory(oldMessages, provider);
+  const summary = await summarizeHistory(oldMessages, provider, endUserId);
 
   return [
     { role: "user", content: `[Resumen de la conversación anterior: ${summary}]` },
@@ -645,7 +661,8 @@ export async function queryCampaign(
   docs: CampaignDoc[],
   question: string,
   history: { role: "user" | "assistant"; content: string }[] = [],
-  provider: LlmProvider = "anthropic"
+  provider: LlmProvider = "anthropic",
+  endUserId?: string
 ): Promise<QueryResult> {
   // Sin docs: respuesta directa sin llamar al modelo
   if (docs.length === 0) {
@@ -660,9 +677,9 @@ export async function queryCampaign(
     };
   }
 
-  const selectedDocs = (await selectRelevantDocs(docs, question, provider)) ?? docs;
+  const selectedDocs = (await selectRelevantDocs(docs, question, provider, endUserId)) ?? docs;
   const systemPrompt = buildSystemPrompt(selectedDocs);
-  const preparedHistory = await prepareHistory(history, provider);
+  const preparedHistory = await prepareHistory(history, provider, endUserId);
 
   const response = await callLlm({
     provider,
@@ -671,6 +688,8 @@ export async function queryCampaign(
     messages: [...preparedHistory, { role: "user", content: question }],
     maxTokens: 2048,
     cacheSystem: true,
+    endUserId,
+    tag: "query",
   });
 
   return {

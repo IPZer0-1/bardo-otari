@@ -13,10 +13,12 @@ import { findDuplicate, normalizeAndHash, recordIngestedNote } from "@/db/ingest
 import { validatePostIngest } from "@/lib/validate-ingest";
 import { extractIngestMetadata } from "@/lib/extract-metadata";
 import { getCurrentProvider } from "@/lib/llm-provider";
+import { LlmBudgetExceededError } from "@/lib/llm-call";
 import {
   ensureQuota,
   GOLD_COSTS,
   QuotaExceededError,
+  buildGatewayBudgetResponse,
   buildQuotaExceededResponse,
   type LlmOperation,
 } from "@/lib/quota";
@@ -228,7 +230,7 @@ export async function POST(req: Request) {
     }
 
     if (effectiveKind === "correction") {
-      const result = await ingestCorrection(docs, trimmedText, metadata, provider);
+      const result = await ingestCorrection(docs, trimmedText, metadata, provider, session.user.id);
 
       if (VALIDATION_ENABLED) {
         const validation = validatePostIngest(result.updates);
@@ -279,9 +281,9 @@ export async function POST(req: Request) {
     }
 
     // forceBatch/useBatch ya calculados arriba para la decisión de cuota.
-    // La Anthropic Batch API no tiene equivalente directo en OpenAI; cuando
-    // el provider activo es OpenAI caemos a llamada síncrona aunque la nota
-    // sea larga (gpt-5.6-luna es lo bastante rápido para hacerlo en línea).
+    // La Anthropic Batch API no tiene equivalente directo en OpenAI ni en
+    // Otari (su /batches es de estilo OpenAI); con esos providers caemos a
+    // llamada síncrona aunque la nota sea larga.
     if (useBatch) {
       const { batchId, customId } = await startBatchIngest(docs, trimmedText, metadata);
       await pool.query(
@@ -299,7 +301,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const result = await ingestNotes(docs, trimmedText, metadata, provider);
+    const result = await ingestNotes(docs, trimmedText, metadata, provider, session.user.id);
 
     if (VALIDATION_ENABLED) {
       const validation = validatePostIngest(result.updates);
@@ -357,6 +359,9 @@ export async function POST(req: Request) {
   } catch (err) {
     if (uploadId) {
       await pool.query(`UPDATE uploads SET status = 'failed' WHERE id = $1`, [uploadId]);
+    }
+    if (err instanceof LlmBudgetExceededError) {
+      return NextResponse.json(buildGatewayBudgetResponse(), { status: 429 });
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error("Ingest error:", message);

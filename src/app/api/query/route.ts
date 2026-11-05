@@ -4,10 +4,12 @@ import { getCampaignById } from "@/db/campaigns";
 import { getDocsForCampaign } from "@/db/docs";
 import { queryCampaign } from "@/lib/claude";
 import { getCurrentProvider } from "@/lib/llm-provider";
+import { LlmBudgetExceededError } from "@/lib/llm-call";
 import {
   ensureQuota,
   GOLD_COSTS,
   QuotaExceededError,
+  buildGatewayBudgetResponse,
   buildQuotaExceededResponse,
 } from "@/lib/quota";
 import {
@@ -69,7 +71,15 @@ export async function POST(req: Request) {
     }
   }
 
-  const result = await queryCampaign(docs, question.trim(), historyMessages, provider);
+  let result;
+  try {
+    result = await queryCampaign(docs, question.trim(), historyMessages, provider, session.user.id);
+  } catch (err) {
+    if (err instanceof LlmBudgetExceededError) {
+      return NextResponse.json(buildGatewayBudgetResponse(), { status: 429 });
+    }
+    throw err;
+  }
 
   if (historyMessages.length === 0) {
     cacheAnswer(campaign_id, cacheQuestionKey, docsVersion, result.answer).catch(() => {});

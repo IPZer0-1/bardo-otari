@@ -129,6 +129,21 @@ export async function ensureQuota(
 }
 
 /**
+ * Mensaje 429 cuando corta el presupuesto del gateway (Otari) en vez de
+ * nuestras monedas. Es una red de seguridad: con la cuota bien calibrada
+ * no debería verse. No se cobran monedas (el log solo se escribe al
+ * terminar bien).
+ */
+export function buildGatewayBudgetResponse() {
+  return {
+    error:
+      "Se ha alcanzado el límite de gasto de IA. No se te han descontado monedas; " +
+      "inténtalo más tarde o avisa al administrador de la campaña.",
+    gateway_budget: true,
+  };
+}
+
+/**
  * Mensaje 429 estándar para devolver al frontend. Centralizado para
  * coherencia entre rutas.
  */

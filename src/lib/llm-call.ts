@@ -207,9 +207,16 @@ function toBudgetError(err: unknown): LlmBudgetExceededError | null {
 
 async function callOtari(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
   try {
-    return model.startsWith("anthropic:")
+    const result = model.startsWith("anthropic:")
       ? await callOtariMessages(opts, model)
       : await callOtariChat(opts, model);
+    const cost = result.costUsd !== undefined ? `$${result.costUsd.toFixed(5)}` : "?";
+    console.log(
+      `[otari] op=${opts.tag ?? "-"} pedido=${model} servido=${result.model}` +
+        ` tokens=${result.inputTokens}+${result.outputTokens} coste=${cost}` +
+        (result.fallback ? " FALLBACK" : "")
+    );
+    return result;
   } catch (err) {
     throw toBudgetError(err) ?? err;
   }
