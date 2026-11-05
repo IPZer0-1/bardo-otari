@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { MODEL_IDS, type LlmProvider } from "./llm-provider";
@@ -8,6 +9,19 @@ const anthropic = () =>
   _anthropic ?? (_anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }));
 const openai = () =>
   _openai ?? (_openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
+
+// Otari (gateway opcional) habla los dos protocolos: usamos los mismos SDK
+// apuntando a su URL con su key. El Anthropic SDK añade `/v1/messages` y el
+// de OpenAI espera la base con `/v1`.
+const OTARI_BASE_URL = process.env.OTARI_BASE_URL || "https://api.otari.ai/api";
+let _otariAnthropic: Anthropic | undefined;
+let _otariOpenai: OpenAI | undefined;
+const otariAnthropic = () =>
+  _otariAnthropic ??
+  (_otariAnthropic = new Anthropic({ apiKey: process.env.OTARI_API_KEY, baseURL: OTARI_BASE_URL }));
+const otariOpenai = () =>
+  _otariOpenai ??
+  (_otariOpenai = new OpenAI({ apiKey: process.env.OTARI_API_KEY, baseURL: `${OTARI_BASE_URL}/v1` }));
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -24,10 +38,18 @@ export interface LlmCallOptions {
    */
   maxTokens: number;
   /**
-   * Si true y provider=anthropic, marca el system con cache_control 1h.
-   * Ignorado en OpenAI (no expone esa primitiva).
+   * Si true y el modelo es de Anthropic, marca el system con cache_control
+   * 1h. Ignorado en OpenAI (no expone esa primitiva).
    */
   cacheSystem?: boolean;
+  /**
+   * Usuario de Bardo que origina la llamada (users.id). Solo lo usa Otari,
+   * para aplicar su presupuesto por usuario y atribuirle el coste. Los
+   * providers directos no lo reciben.
+   */
+  endUserId?: string;
+  /** Operación lógica (query, ingest…) para etiquetar el coste en Otari. */
+  tag?: string;
 }
 
 export interface LlmCallResult {
@@ -36,8 +58,28 @@ export interface LlmCallResult {
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
-  /** ID concreto del modelo usado, para guardar en usage_logs.model. */
+  /**
+   * Modelo usado, para guardar en usage_logs.model. Vía Otari es el que
+   * respondió de verdad (`proveedor:modelo`), que con una política de
+   * routing puede ser el de fallback.
+   */
   model: string;
+  /** Solo vía Otari: coste real en USD que reporta el gateway. */
+  costUsd?: number;
+  /** Solo vía Otari: true si respondió un candidato de fallback. */
+  fallback?: boolean;
+}
+
+/**
+ * Otari rechaza con 403 + `Otari-Error-Code: budget_exceeded` cuando se
+ * agota un presupuesto (del usuario, del workspace…). Las rutas lo
+ * traducen a un mensaje para el jugador.
+ */
+export class LlmBudgetExceededError extends Error {
+  constructor(public readonly scope: string | null) {
+    super(`Presupuesto del gateway agotado${scope ? ` (${scope})` : ""}`);
+    this.name = "LlmBudgetExceededError";
+  }
 }
 
 /**
@@ -48,12 +90,14 @@ export interface LlmCallResult {
  *   - Sonnet 5.5 devuelve 400 con `disabled`; el equivalente es
  *     `between_tools`. El SDK 0.88 aún no tiene ese tipo, de ahí el cast.
  * Modelos no listados: no se envía `thinking` (comportamiento del modelo).
+ * Acepta también el formato de Otari `anthropic:claude-…`.
  */
 export function thinkingConfigFor(
   model: string
 ): Anthropic.Messages.ThinkingConfigParam | undefined {
-  if (model.startsWith("claude-haiku-5")) return { type: "disabled" };
-  if (model.startsWith("claude-sonnet-5-5")) {
+  const id = model.replace(/^anthropic:/, "");
+  if (id.startsWith("claude-haiku-5")) return { type: "disabled" };
+  if (id.startsWith("claude-sonnet-5-5")) {
     return { type: "between_tools" } as unknown as Anthropic.Messages.ThinkingConfigParam;
   }
   return undefined;
@@ -67,8 +111,22 @@ export function extractText(content: Anthropic.Messages.ContentBlock[]): string 
     .join("");
 }
 
+function anthropicSystem(opts: LlmCallOptions) {
+  return opts.cacheSystem
+    ? [
+        {
+          type: "text" as const,
+          text: opts.system,
+          cache_control: { type: "ephemeral", ttl: "1h" } as { type: "ephemeral" },
+        },
+      ]
+    : opts.system;
+}
+
 export async function callLlm(opts: LlmCallOptions): Promise<LlmCallResult> {
   const model = MODEL_IDS[opts.tier][opts.provider];
+
+  if (opts.provider === "otari") return callOtari(opts, model);
 
   if (opts.provider === "openai") {
     const response = await openai().chat.completions.create({
@@ -95,15 +153,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmCallResult> {
     model,
     max_tokens: opts.maxTokens,
     ...(thinking ? { thinking } : {}),
-    system: opts.cacheSystem
-      ? [
-          {
-            type: "text",
-            text: opts.system,
-            cache_control: { type: "ephemeral", ttl: "1h" } as { type: "ephemeral" },
-          },
-        ]
-      : opts.system,
+    system: anthropicSystem(opts),
     messages: opts.messages,
   });
   const text = extractText(response.content);
@@ -114,5 +164,109 @@ export async function callLlm(opts: LlmCallOptions): Promise<LlmCallResult> {
     cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
     cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
     model,
+  };
+}
+
+// --- Otari ---
+
+/**
+ * Cabeceras propias de Otari (no se reenvían al proveedor):
+ *   - Otari-Tags: etiqueta de coste visible en Usage/Activity.
+ *   - Idempotency-Key: si el SDK reintenta (reusa las mismas opciones),
+ *     Otari devuelve la respuesta original sin volver a facturar.
+ */
+function otariHeaders(opts: LlmCallOptions): Record<string, string> {
+  const tags = ["app=bardo", `tier=${opts.tier}`];
+  if (opts.tag) tags.push(`op=${encodeURIComponent(opts.tag)}`);
+  return { "Otari-Tags": tags.join(","), "Idempotency-Key": randomUUID() };
+}
+
+/** Modelo que respondió según Otari, p. ej. `deepinfra:mistral-small-4`. */
+function servedModel(headers: Headers, requested: string): string {
+  const served = headers.get("otari-model");
+  if (!served) return requested;
+  const provider = headers.get("otari-provider");
+  return provider ? `${provider}:${served}` : served;
+}
+
+function readCostUsd(usage: unknown): number | undefined {
+  const cost = (usage as { cost_usd?: unknown } | null | undefined)?.cost_usd;
+  return typeof cost === "number" ? cost : undefined;
+}
+
+function toBudgetError(err: unknown): LlmBudgetExceededError | null {
+  const e = err as { status?: number; headers?: Headers | Record<string, string> } | null;
+  if (!e || e.status !== 403 || !e.headers) return null;
+  const get = (name: string) =>
+    typeof (e.headers as Headers).get === "function"
+      ? (e.headers as Headers).get(name)
+      : ((e.headers as Record<string, string>)[name] ?? null);
+  if (get("otari-error-code") !== "budget_exceeded") return null;
+  return new LlmBudgetExceededError(get("otari-budget-scope"));
+}
+
+async function callOtari(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
+  try {
+    return model.startsWith("anthropic:")
+      ? await callOtariMessages(opts, model)
+      : await callOtariChat(opts, model);
+  } catch (err) {
+    throw toBudgetError(err) ?? err;
+  }
+}
+
+/** Claude vía Otari por la ruta Messages: conserva thinking y caché. */
+async function callOtariMessages(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
+  const thinking = thinkingConfigFor(model);
+  const { data, response } = await otariAnthropic()
+    .messages.create(
+      {
+        model,
+        max_tokens: opts.maxTokens,
+        ...(thinking ? { thinking } : {}),
+        system: anthropicSystem(opts),
+        messages: opts.messages,
+        ...(opts.endUserId ? { metadata: { user_id: opts.endUserId } } : {}),
+      },
+      { headers: otariHeaders(opts) }
+    )
+    .withResponse();
+  return {
+    text: extractText(data.content),
+    inputTokens: data.usage.input_tokens,
+    outputTokens: data.usage.output_tokens,
+    cacheCreationTokens: data.usage.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: data.usage.cache_read_input_tokens ?? 0,
+    model: servedModel(response.headers, model),
+    costUsd: readCostUsd(data.usage),
+    fallback: response.headers.get("otari-fallback") === "true",
+  };
+}
+
+/** Resto de modelos (abiertos, políticas de routing) por la ruta OpenAI. */
+async function callOtariChat(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
+  const { data, response } = await otariOpenai()
+    .chat.completions.create(
+      {
+        model,
+        max_completion_tokens: opts.maxTokens,
+        messages: [{ role: "system", content: opts.system }, ...opts.messages],
+        ...(opts.endUserId ? { user: opts.endUserId } : {}),
+      },
+      { headers: otariHeaders(opts) }
+    )
+    .withResponse();
+  const cached =
+    (data.usage as { prompt_tokens_details?: { cached_tokens?: number } } | undefined)
+      ?.prompt_tokens_details?.cached_tokens ?? 0;
+  return {
+    text: data.choices[0]?.message?.content ?? "",
+    inputTokens: data.usage?.prompt_tokens ?? 0,
+    outputTokens: data.usage?.completion_tokens ?? 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: cached,
+    model: servedModel(response.headers, model),
+    costUsd: readCostUsd(data.usage),
+    fallback: response.headers.get("otari-fallback") === "true",
   };
 }

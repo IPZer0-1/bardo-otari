@@ -1,7 +1,18 @@
-import { getProviderStatus, MODEL_IDS } from "@/lib/llm-provider";
+import {
+  getProviderStatus,
+  isOtariConfigured,
+  MODEL_IDS,
+  type LlmProvider,
+} from "@/lib/llm-provider";
 import ProviderToggle from "./ProviderToggle";
 
 export const dynamic = "force-dynamic";
+
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  otari: "Otari",
+};
 
 const TIER_LABELS: Record<keyof typeof MODEL_IDS, string> = {
   haiku: "Consultas e ingestas cortas",
@@ -12,6 +23,9 @@ const TIER_LABELS: Record<keyof typeof MODEL_IDS, string> = {
 export default async function AdminModelsPage() {
   const status = await getProviderStatus();
   const tiers = Object.keys(MODEL_IDS) as (keyof typeof MODEL_IDS)[];
+  const providers: LlmProvider[] = isOtariConfigured()
+    ? ["anthropic", "openai", "otari"]
+    : ["anthropic", "openai"];
 
   return (
     <div>
@@ -23,7 +37,7 @@ export default async function AdminModelsPage() {
 
       <section className="mb-8">
         <h2 className="text-sm uppercase tracking-wide text-zinc-400 mb-3">Proveedor activo</h2>
-        <ProviderToggle current={status.provider} />
+        <ProviderToggle current={status.provider} available={providers} />
         <p className="mt-3 text-xs text-zinc-500">
           {status.source === "admin"
             ? `Elegido en este panel${status.updatedBy ? ` por ${status.updatedBy}` : ""}${
@@ -32,9 +46,15 @@ export default async function AdminModelsPage() {
             : "Sin elección en el panel: se usa la variable LLM_DEFAULT_PROVIDER de Coolify."}
         </p>
         <p className="mt-1 text-xs text-zinc-500">
-          Las ingestas por lotes (Batch API) solo existen con Anthropic; con OpenAI
-          las notas largas se procesan en línea.
+          Las ingestas por lotes (Batch API) solo existen con Anthropic directo; con
+          OpenAI u Otari las notas largas se procesan en línea.
         </p>
+        {providers.includes("otari") && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Otari es el gateway de Mozilla.ai: modelos abiertos, routing con fallback y
+            presupuesto por usuario. Uso, coste y fallbacks se ven en su panel (Activity).
+          </p>
+        )}
       </section>
 
       <section>
@@ -44,8 +64,11 @@ export default async function AdminModelsPage() {
             <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-2">Tier</th>
-                <th className="text-left px-4 py-2">Anthropic</th>
-                <th className="text-left px-4 py-2">OpenAI</th>
+                {providers.map((p) => (
+                  <th key={p} className="text-left px-4 py-2">
+                    {PROVIDER_LABELS[p]}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -55,7 +78,7 @@ export default async function AdminModelsPage() {
                     <div className="text-zinc-200">{tier}</div>
                     <div className="text-xs text-zinc-500">{TIER_LABELS[tier]}</div>
                   </td>
-                  {(["anthropic", "openai"] as const).map((p) => (
+                  {providers.map((p) => (
                     <td
                       key={p}
                       className={`px-4 py-2 font-mono ${

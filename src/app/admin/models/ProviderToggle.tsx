@@ -2,15 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-type Provider = "anthropic" | "openai";
+import type { LlmProvider as Provider } from "@/lib/llm-provider";
 
 const OPTIONS: { value: Provider; label: string; active: string }[] = [
   { value: "anthropic", label: "Anthropic", active: "bg-amber-500 text-black font-semibold" },
   { value: "openai", label: "OpenAI", active: "bg-emerald-500 text-black font-semibold" },
+  { value: "otari", label: "Otari (gateway)", active: "bg-violet-400 text-black font-semibold" },
 ];
 
-export default function ProviderToggle({ current }: { current: Provider }) {
+export default function ProviderToggle({
+  current,
+  available,
+}: {
+  current: Provider;
+  /** Opciones que se pueden elegir (Otari solo si hay OTARI_API_KEY). */
+  available: Provider[];
+}) {
   const router = useRouter();
   const [saving, setSaving] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +44,7 @@ export default function ProviderToggle({ current }: { current: Provider }) {
   return (
     <div>
       <div className="inline-flex rounded-full border border-zinc-700 bg-zinc-950 p-1 text-sm">
-        {OPTIONS.map((opt) => (
+        {OPTIONS.filter((opt) => available.includes(opt.value)).map((opt) => (
           <button
             key={opt.value}
             onClick={() => choose(opt.value)}

@@ -1,19 +1,31 @@
 import { cookies } from "next/headers";
 import { getAppSetting } from "@/db/app-settings";
 
-export type LlmProvider = "anthropic" | "openai";
+/**
+ * Backend de las llamadas LLM. "otari" es el gateway de Mozilla.ai
+ * (https://otari.ai): opcional, solo disponible si existe OTARI_API_KEY.
+ * Quitarlo = borrar este valor, su columna en MODEL_IDS y su rama en
+ * callLlm; si la BD aún dice "otari", isValidProvider lo rechaza y se
+ * vuelve a LLM_DEFAULT_PROVIDER sin migraciones.
+ */
+export type LlmProvider = "anthropic" | "openai" | "otari";
+
+/** Otari solo se ofrece si hay credencial; sin ella la app ni lo ve. */
+export function isOtariConfigured(): boolean {
+  return Boolean(process.env.OTARI_API_KEY);
+}
 
 export const LLM_PROVIDER_COOKIE = "llm-provider";
 
 /**
  * Provider por defecto cuando no hay cookie. Se controla con la env var
- * LLM_DEFAULT_PROVIDER (anthropic | openai). Por defecto "anthropic"
+ * LLM_DEFAULT_PROVIDER (anthropic | openai | otari). Por defecto "anthropic"
  * (Haiku 5.5 es más barato que cualquier opción vigente de OpenAI); en
  * desarrollo el toggle visual lo sobrescribe vía cookie.
  */
 function readDefaultProvider(): LlmProvider {
   const raw = process.env.LLM_DEFAULT_PROVIDER;
-  if (raw === "anthropic" || raw === "openai") return raw;
+  if (isValidProvider(raw)) return raw;
   return "anthropic";
 }
 
@@ -44,6 +56,13 @@ export const DEFAULT_PROVIDER: LlmProvider = readDefaultProvider();
  *     gpt-5.6-terra ($2 / $12) si luna se queda corto en JSON estricto.
  *     gpt-5 / gpt-5-mini / gpt-5-nano se apagan el 2026-12-11.
  *
+ *   otari (gateway opcional): cada celda es un ID del catálogo de Otari
+ *     (`vendor/modelo`), un `proveedor:modelo` con key propia (BYOK,
+ *     p. ej. `anthropic:claude-haiku-5-5`) o el nombre de una política de
+ *     routing creada en el workspace de Otari (fallbacks incluidos).
+ *     Los `anthropic:*` van por la ruta Messages (thinking y caché
+ *     intactos); el resto por la ruta OpenAI-compatible.
+ *
  * Al cambiar de modelo revisa THINKING_CONFIG en llm-call.ts: los modelos
  * Claude 5.x razonan por defecto (más tokens de salida facturados).
  */
@@ -51,19 +70,23 @@ export const MODEL_IDS = {
   haiku: {
     openai:    process.env.LLM_MODEL_HAIKU_OPENAI    ?? "gpt-5.6-luna",
     anthropic: process.env.LLM_MODEL_HAIKU_ANTHROPIC ?? "claude-haiku-5-5",
+    otari:     process.env.LLM_MODEL_HAIKU_OTARI     || "mistralai/mistral-small-4",
   },
   sonnet: {
     openai:    process.env.LLM_MODEL_SONNET_OPENAI    ?? "gpt-5.6-luna",
     anthropic: process.env.LLM_MODEL_SONNET_ANTHROPIC ?? "claude-haiku-5-5",
+    otari:     process.env.LLM_MODEL_SONNET_OTARI     || "anthropic:claude-haiku-5-5",
   },
   summary: {
     openai:    process.env.LLM_MODEL_SUMMARY_OPENAI    ?? "gpt-5.6-luna",
     anthropic: process.env.LLM_MODEL_SUMMARY_ANTHROPIC ?? "claude-haiku-5-5",
+    otari:     process.env.LLM_MODEL_SUMMARY_OTARI     || "openai/gpt-oss-20b",
   },
 } as const;
 
 export function isValidProvider(value: unknown): value is LlmProvider {
-  return value === "anthropic" || value === "openai";
+  if (value === "anthropic" || value === "openai") return true;
+  return value === "otari" && isOtariConfigured();
 }
 
 export const LLM_PROVIDER_SETTING_KEY = "llm_provider";
