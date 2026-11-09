@@ -1,0 +1,60 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://bardo:bardo@db:5432/bardo
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Provider y modelos por tier. Opcionales: si no se setean caen a los
+      # defaults definidos en src/lib/llm-provider.ts (anthropic + Haiku 5.5 en
+      # todos los tiers). Cambiar aquí + `docker compose restart app` para
+      # alternar sin tocar código. Ver `.env.example` para opciones.
+      LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-anthropic}
+      LLM_MODEL_HAIKU_OPENAI: ${LLM_MODEL_HAIKU_OPENAI:-}
+      LLM_MODEL_HAIKU_ANTHROPIC: ${LLM_MODEL_HAIKU_ANTHROPIC:-}
+      LLM_MODEL_SONNET_OPENAI: ${LLM_MODEL_SONNET_OPENAI:-}
+      LLM_MODEL_SONNET_ANTHROPIC: ${LLM_MODEL_SONNET_ANTHROPIC:-}
+      LLM_MODEL_SUMMARY_OPENAI: ${LLM_MODEL_SUMMARY_OPENAI:-}
+      LLM_MODEL_SUMMARY_ANTHROPIC: ${LLM_MODEL_SUMMARY_ANTHROPIC:-}
+      # Cuota diaria por usuario en "monedas de oro" (P0.6). Ver .env.example
+      # para la tabla de costes por operación. Default: 100. Reset 00:00 UTC.
+      LLM_QUOTA_DAILY_GOLD_PER_USER: ${LLM_QUOTA_DAILY_GOLD_PER_USER:-100}
+      # Flags de la fase de ingesta determinista (medidas a/b/c/d).
+      INGEST_DEDUP_ENABLED: ${INGEST_DEDUP_ENABLED:-false}
+      INGEST_VALIDATION_ENABLED: ${INGEST_VALIDATION_ENABLED:-false}
+      INGEST_METADATA_ENABLED: ${INGEST_METADATA_ENABLED:-false}
+      INGEST_ROUTING_ENABLED: ${INGEST_ROUTING_ENABLED:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bardo
+      POSTGRES_PASSWORD: bardo
+      POSTGRES_DB: bardo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      # Bind a 127.0.0.1: la BD solo es accesible desde el propio VPS
+      # (loopback). Mientras la migración a Coolify no esté hecha, el
+      # `npm run dev` del host sigue conectando por localhost. Si se
+      # contenericiza la app o se mueve a Coolify, este puerto puede
+      # eliminarse y dejar la conexión solo por la red interna de Docker.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bardo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
