@@ -20,6 +20,13 @@ services:
       LLM_MODEL_SONNET_ANTHROPIC: ${LLM_MODEL_SONNET_ANTHROPIC:-}
       LLM_MODEL_SUMMARY_OPENAI: ${LLM_MODEL_SUMMARY_OPENAI:-}
       LLM_MODEL_SUMMARY_ANTHROPIC: ${LLM_MODEL_SUMMARY_ANTHROPIC:-}
+      # Otari (gateway opcional, docs/otari.md). Sin OTARI_API_KEY la opción
+      # no aparece y la app funciona igual que sin Otari.
+      OTARI_API_KEY: ${OTARI_API_KEY:-}
+      OTARI_BASE_URL: ${OTARI_BASE_URL:-}
+      LLM_MODEL_HAIKU_OTARI: ${LLM_MODEL_HAIKU_OTARI:-}
+      LLM_MODEL_SONNET_OTARI: ${LLM_MODEL_SONNET_OTARI:-}
+      LLM_MODEL_SUMMARY_OTARI: ${LLM_MODEL_SUMMARY_OTARI:-}
       # Cuota diaria por usuario en "monedas de oro" (P0.6). Ver .env.example
       # para la tabla de costes por operación. Default: 100. Reset 00:00 UTC.
       LLM_QUOTA_DAILY_GOLD_PER_USER: ${LLM_QUOTA_DAILY_GOLD_PER_USER:-100}
