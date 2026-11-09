@@ -53,7 +53,7 @@ vi.mock("openai", () => ({
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 vi.mock("@/db/app-settings", () => ({ getAppSetting: vi.fn() }));
 
-const { callLlm, LlmBudgetExceededError, reasoningEffortFor } = await import("../llm-call");
+const { callLlm, LlmBudgetExceededError, otariReasoningEffort, readGuardrails } = await import("../llm-call");
 const { isValidProvider, MODEL_IDS, DEFAULT_PROVIDER } = await import("../llm-provider");
 // Algunos tests fuerzan un modelo anthropic:* en el tier sonnet; se restaura en beforeEach.
 const defaultOtariModels = [MODEL_IDS.haiku.otari, MODEL_IDS.sonnet.otari, MODEL_IDS.summary.otari];
@@ -181,6 +181,7 @@ describe("callLlm · otari", () => {
     expect(body).toEqual({
       model: MODEL_IDS.haiku.otari,
       max_completion_tokens: 100,
+      reasoning_effort: "none",
       messages: [{ role: "system", content: "SYS" }, ...base.messages],
       user: "user-uuid",
     });
@@ -254,16 +255,27 @@ describe("callLlm · otari", () => {
     expect(defaultOtariModels.every((m) => !m.startsWith("anthropic:"))).toBe(true);
   });
 
-  it("ajusta reasoning_effort según el modelo", async () => {
-    expect(reasoningEffortFor("alibaba/qwen-3.5-35b-a3b")).toBe("none");
-    expect(reasoningEffortFor("openai/gpt-oss-20b")).toBe("low");
-    expect(reasoningEffortFor("mistralai/mistral-small-4")).toBeUndefined();
-    expect(reasoningEffortFor("bardo-query")).toBeUndefined();
-
-    await callLlm({ ...base, provider: "otari", tier: "summary" });
-    expect(openaiCreate.mock.calls[0][0].reasoning_effort).toBe("low");
+  it("envía reasoning_effort none por defecto, configurable", async () => {
     await callLlm({ ...base, provider: "otari", tier: "haiku" });
+    expect(openaiCreate.mock.calls[0][0].reasoning_effort).toBe("none");
+
+    process.env.OTARI_REASONING_EFFORT = "low";
+    expect(otariReasoningEffort()).toBe("low");
+    process.env.OTARI_REASONING_EFFORT = "omit";
+    await callLlm({ ...base, provider: "otari", tier: "summary" });
     expect(openaiCreate.mock.calls[1][0]).not.toHaveProperty("reasoning_effort");
+    delete process.env.OTARI_REASONING_EFFORT;
+  });
+
+  it("devuelve los veredictos de Otari-Guardrails", async () => {
+    const verdicts = [{ profile: "moderation", mode: "monitor", valid: false, score: 0.91, status: "evaluated" }];
+    openaiCreate.mockImplementation(() =>
+      apiPromise(openaiCompletion(), { "Otari-Guardrails": JSON.stringify(verdicts) })
+    );
+    const r = await callLlm({ ...base, provider: "otari", tier: "haiku", tag: "ingest_short" });
+    expect(r.guardrails).toEqual(verdicts);
+    expect(readGuardrails(new Headers({ "Otari-Guardrails": "no-json" }))).toBeUndefined();
+    expect(readGuardrails(new Headers())).toBeUndefined();
   });
 
   it("traduce el 403 budget_exceeded a LlmBudgetExceededError", async () => {

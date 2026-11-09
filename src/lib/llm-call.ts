@@ -68,6 +68,21 @@ export interface LlmCallResult {
   costUsd?: number;
   /** Solo vía Otari: true si respondió un candidato de fallback. */
   fallback?: boolean;
+  /** Solo vía Otari: veredictos de los guardrails (cabecera Otari-Guardrails). */
+  guardrails?: GuardrailVerdict[];
+}
+
+/**
+ * Un guardrail de entrada evaluado por Otari. En modo `monitor` la petición
+ * se sirve siempre y el veredicto llega aquí: `valid: false` = marcado.
+ */
+export interface GuardrailVerdict {
+  profile: string;
+  mode: "monitor" | "block";
+  valid: boolean | null;
+  score: number | null;
+  status: string;
+  reason?: string;
 }
 
 /**
@@ -212,15 +227,42 @@ function otariEndUser(opts: LlmCallOptions): string | undefined {
  * como salida: con un tope bajo pueden agotarlo y devolver `content` vacío.
  * Medido en Otari (2026-11-09) con un selector de docs:
  *   - Qwen 3.5: solo `none` lo apaga (800 tokens sin respuesta → 12).
- *   - gpt-oss: no admite apagarlo del todo; `low` lo reduce (248 → 55).
- *   - Mistral Small: no razona; no se envía nada.
- * Modelos no listados (incluidas las políticas de routing): no se envía.
+ *   - gpt-oss-20b/120b: `none` lo reduce (215 → 75; 254 → 65).
+ *   - Mistral Small 4: no razona sin parámetro, pero `low` lo *activa*
+ *     (agota 600 tokens), así que no vale un `low` genérico.
+ *   - DeepSeek v4.1 flash, Llama 3.3, Gemma 4: aceptan `none` sin cambios.
+ * Por eso se envía `none` siempre, también a las políticas de routing,
+ * cuyo modelo real no se conoce hasta la respuesta.
+ * OTARI_REASONING_EFFORT cambia el valor; `omit` no envía el parámetro.
  */
-export function reasoningEffortFor(model: string): "none" | "low" | undefined {
-  const id = model.toLowerCase();
-  if (id.includes("qwen-3.5") || id.includes("qwen3.5")) return "none";
-  if (id.includes("gpt-oss")) return "low";
-  return undefined;
+export function otariReasoningEffort(): OpenAI.ReasoningEffort | undefined {
+  const raw = process.env.OTARI_REASONING_EFFORT?.trim();
+  if (raw === "omit") return undefined;
+  return (raw || "none") as OpenAI.ReasoningEffort;
+}
+
+/** Lee `Otari-Guardrails` (JSON); si falta o no se entiende, undefined. */
+export function readGuardrails(headers: Headers): GuardrailVerdict[] | undefined {
+  const raw = headers.get("otari-guardrails");
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as GuardrailVerdict[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resumen para el log: solo lo marcado o lo que no se pudo evaluar. */
+function guardrailLog(verdicts: GuardrailVerdict[] | undefined): string {
+  const notable = (verdicts ?? []).filter((v) => v.valid === false || v.status === "unavailable");
+  return notable
+    .map((v) =>
+      v.valid === false
+        ? ` GUARDRAIL:${v.profile}=marcado${v.score != null ? `(${v.score})` : ""}`
+        : ` guardrail:${v.profile}=no-evaluado(${v.reason ?? "?"})`
+    )
+    .join("");
 }
 
 function toBudgetError(err: unknown): LlmBudgetExceededError | null {
@@ -243,7 +285,8 @@ async function callOtari(opts: LlmCallOptions, model: string): Promise<LlmCallRe
     console.log(
       `[otari] op=${opts.tag ?? "-"} pedido=${model} servido=${result.model}` +
         ` tokens=${result.inputTokens}+${result.outputTokens} coste=${cost}` +
-        (result.fallback ? " FALLBACK" : "")
+        (result.fallback ? " FALLBACK" : "") +
+        guardrailLog(result.guardrails)
     );
     return result;
   } catch (err) {
@@ -277,13 +320,14 @@ async function callOtariMessages(opts: LlmCallOptions, model: string): Promise<L
     model: servedModel(response.headers, model),
     costUsd: readCostUsd(data.usage),
     fallback: response.headers.get("otari-fallback") === "true",
+    guardrails: readGuardrails(response.headers),
   };
 }
 
 /** Resto de modelos (abiertos, políticas de routing) por la ruta OpenAI. */
 async function callOtariChat(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
   const endUser = otariEndUser(opts);
-  const effort = reasoningEffortFor(model);
+  const effort = otariReasoningEffort();
   const { data, response } = await otariOpenai()
     .chat.completions.create(
       {
@@ -308,5 +352,6 @@ async function callOtariChat(opts: LlmCallOptions, model: string): Promise<LlmCa
     model: servedModel(response.headers, model),
     costUsd: readCostUsd(data.usage),
     fallback: response.headers.get("otari-fallback") === "true",
+    guardrails: readGuardrails(response.headers),
   };
 }

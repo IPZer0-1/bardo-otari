@@ -375,6 +375,18 @@ function parseIngestResponse(
 const HAIKU_INGEST_MAX_NOTES_WORDS = 500;
 const HAIKU_INGEST_MAX_DOCS = 5;
 
+/**
+ * Vía Otari toda ingesta (y corrección) usa el tier sonnet. El reparto
+ * haiku/sonnet por tamaño es un ahorro pensado para Claude; en Otari el
+ * modelo de ingesta (gpt-oss-120b) es más barato que el de consultas y el
+ * de consultas (Mistral Small 4) perdía o duplicaba secciones al parchear
+ * (3 de 6 ingestas en la prueba del 2026-11-09, frente a 8/8 de gpt-oss-120b).
+ */
+function ingestTier(provider: LlmProvider, short: boolean): "haiku" | "sonnet" {
+  if (provider === "otari") return "sonnet";
+  return short ? "haiku" : "sonnet";
+}
+
 export function shouldIngestUseHaiku(docs: CampaignDoc[], notes: string): boolean {
   const wordCount = notes.split(/\s+/).length;
   return wordCount <= HAIKU_INGEST_MAX_NOTES_WORDS && docs.length <= HAIKU_INGEST_MAX_DOCS;
@@ -407,7 +419,8 @@ export async function ingestNotes(
 
   // Tier según el tamaño de las notas. Ambos slots se enrutan por callLlm,
   // así que respetan el provider del toggle / DEFAULT_PROVIDER.
-  const tier = shouldIngestUseHaiku(docsForPrompt, notes) ? "haiku" : "sonnet";
+  const short = shouldIngestUseHaiku(docsForPrompt, notes);
+  const tier = ingestTier(provider, short);
   const response = await callLlm({
     provider,
     tier,
@@ -415,7 +428,7 @@ export async function ingestNotes(
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 8000,
     endUserId,
-    tag: tier === "haiku" ? "ingest_short" : "ingest_long",
+    tag: short ? "ingest_short" : "ingest_long",
   });
   const result = parseIngestResponse(response.text || "{}", docs);
   return {
@@ -475,7 +488,7 @@ export async function ingestCorrection(
 
   const response = await callLlm({
     provider,
-    tier: "haiku",
+    tier: ingestTier(provider, true),
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
     maxTokens: 2000,

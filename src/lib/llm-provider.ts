@@ -63,6 +63,11 @@ export const DEFAULT_PROVIDER: LlmProvider = readDefaultProvider();
  *     routing creada en el workspace de Otari (fallbacks incluidos).
  *     Los `anthropic:*` van por la ruta Messages (thinking y caché
  *     intactos); el resto por la ruta OpenAI-compatible.
+ *     Defaults (medidos el 2026-11-09 sobre la campaña de demo):
+ *       haiku    mistralai/mistral-small-4  consultas: 2–7 s, ~$0.002
+ *       sonnet   openai/gpt-oss-120b        toda ingesta vía Otari (ver
+ *                ingestTier en claude.ts): 8/8 parches correctos, ~$0.0004
+ *       summary  openai/gpt-oss-20b         selector de docs y resúmenes
  *
  * Al cambiar de modelo revisa THINKING_CONFIG en llm-call.ts: los modelos
  * Claude 5.x razonan por defecto (más tokens de salida facturados).
@@ -76,7 +81,7 @@ export const MODEL_IDS = {
   sonnet: {
     openai:    process.env.LLM_MODEL_SONNET_OPENAI    ?? "gpt-5.6-luna",
     anthropic: process.env.LLM_MODEL_SONNET_ANTHROPIC ?? "claude-haiku-5-5",
-    otari:     process.env.LLM_MODEL_SONNET_OTARI     || "mistralai/mistral-small-4",
+    otari:     process.env.LLM_MODEL_SONNET_OTARI     || "openai/gpt-oss-120b",
   },
   summary: {
     openai:    process.env.LLM_MODEL_SUMMARY_OPENAI    ?? "gpt-5.6-luna",

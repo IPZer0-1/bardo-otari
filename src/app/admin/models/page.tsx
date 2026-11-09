@@ -15,8 +15,8 @@ const PROVIDER_LABELS: Record<LlmProvider, string> = {
 };
 
 const TIER_LABELS: Record<keyof typeof MODEL_IDS, string> = {
-  haiku: "Consultas e ingestas cortas",
-  sonnet: "Ingestas largas",
+  haiku: "Consultas e ingestas cortas (vía Otari: solo consultas)",
+  sonnet: "Ingestas largas (vía Otari: todas las ingestas)",
   summary: "Selector de docs y resúmenes",
 };
 
