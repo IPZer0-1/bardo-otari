@@ -53,8 +53,11 @@ vi.mock("openai", () => ({
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 vi.mock("@/db/app-settings", () => ({ getAppSetting: vi.fn() }));
 
-const { callLlm, LlmBudgetExceededError } = await import("../llm-call");
+const { callLlm, LlmBudgetExceededError, reasoningEffortFor } = await import("../llm-call");
 const { isValidProvider, MODEL_IDS } = await import("../llm-provider");
+// Algunos tests fuerzan un modelo anthropic:* en el tier sonnet; se restaura en beforeEach.
+const defaultOtariModels = [MODEL_IDS.haiku.otari, MODEL_IDS.sonnet.otari, MODEL_IDS.summary.otari];
+const defaultSonnetOtari = MODEL_IDS.sonnet.otari;
 
 const base = {
   system: "SYS",
@@ -64,6 +67,8 @@ const base = {
 
 beforeEach(() => {
   resetSdkMocks();
+  delete process.env.OTARI_SERVICE_KEY;
+  (MODEL_IDS.sonnet as { otari: string }).otari = defaultSonnetOtari;
   anthropicClientOf.length = 0;
   openaiClientOf.length = 0;
   anthropicCreate.mockImplementation(() => apiPromise(anthropicMessage()));
@@ -151,6 +156,7 @@ describe("callLlm · directo no envía nada de Otari", () => {
 
 describe("callLlm · otari", () => {
   it("modelos abiertos van por la ruta OpenAI de Otari con usuario y etiquetas", async () => {
+    process.env.OTARI_SERVICE_KEY = "true";
     openaiCreate.mockImplementation(() =>
       apiPromise(
         openaiCompletion({
@@ -197,7 +203,8 @@ describe("callLlm · otari", () => {
         "Otari-Fallback": "true",
       })
     );
-    expect(MODEL_IDS.sonnet.otari).toBe("anthropic:claude-haiku-5-5");
+    process.env.OTARI_SERVICE_KEY = "true";
+    (MODEL_IDS.sonnet as { otari: string }).otari = "anthropic:claude-haiku-5-5";
     const r = await callLlm({
       ...base,
       provider: "otari",
@@ -232,6 +239,31 @@ describe("callLlm · otari", () => {
     expect(r.model).toBe(MODEL_IDS.summary.otari);
     expect(r.costUsd).toBeUndefined();
     expect(openaiCreate.mock.calls[0][0]).not.toHaveProperty("user");
+  });
+
+  it("sin OTARI_SERVICE_KEY no envía el usuario (Otari daría 403)", async () => {
+    await callLlm({ ...base, provider: "otari", tier: "haiku", endUserId: "user-uuid" });
+    expect(openaiCreate.mock.calls[0][0]).not.toHaveProperty("user");
+
+    (MODEL_IDS.sonnet as { otari: string }).otari = "anthropic:claude-haiku-5-5";
+    await callLlm({ ...base, provider: "otari", tier: "sonnet", endUserId: "user-uuid" });
+    expect(anthropicCreate.mock.calls[0][0]).not.toHaveProperty("metadata");
+  });
+
+  it("los defaults de Otari son modelos abiertos", () => {
+    expect(defaultOtariModels.every((m) => !m.startsWith("anthropic:"))).toBe(true);
+  });
+
+  it("ajusta reasoning_effort según el modelo", async () => {
+    expect(reasoningEffortFor("alibaba/qwen-3.5-35b-a3b")).toBe("none");
+    expect(reasoningEffortFor("openai/gpt-oss-20b")).toBe("low");
+    expect(reasoningEffortFor("mistralai/mistral-small-4")).toBeUndefined();
+    expect(reasoningEffortFor("bardo-query")).toBeUndefined();
+
+    await callLlm({ ...base, provider: "otari", tier: "summary" });
+    expect(openaiCreate.mock.calls[0][0].reasoning_effort).toBe("low");
+    await callLlm({ ...base, provider: "otari", tier: "haiku" });
+    expect(openaiCreate.mock.calls[1][0]).not.toHaveProperty("reasoning_effort");
   });
 
   it("traduce el 403 budget_exceeded a LlmBudgetExceededError", async () => {

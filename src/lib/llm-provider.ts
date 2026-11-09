@@ -75,7 +75,7 @@ export const MODEL_IDS = {
   sonnet: {
     openai:    process.env.LLM_MODEL_SONNET_OPENAI    ?? "gpt-5.6-luna",
     anthropic: process.env.LLM_MODEL_SONNET_ANTHROPIC ?? "claude-haiku-5-5",
-    otari:     process.env.LLM_MODEL_SONNET_OTARI     || "anthropic:claude-haiku-5-5",
+    otari:     process.env.LLM_MODEL_SONNET_OTARI     || "mistralai/mistral-small-4",
   },
   summary: {
     openai:    process.env.LLM_MODEL_SUMMARY_OPENAI    ?? "gpt-5.6-luna",

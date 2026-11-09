@@ -196,6 +196,33 @@ function readCostUsd(usage: unknown): number | undefined {
   return typeof n === "number" && Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * Otari solo acepta un usuario final arbitrario (`user` / `metadata.user_id`)
+ * con una service key; con una key normal responde 403 "'user' field does
+ * not match the authenticated API key's user". Por eso solo se envía si
+ * OTARI_SERVICE_KEY=true. Se lee en cada llamada para poder cambiarlo sin
+ * recargar el módulo en los tests.
+ */
+function otariEndUser(opts: LlmCallOptions): string | undefined {
+  return process.env.OTARI_SERVICE_KEY === "true" ? opts.endUserId : undefined;
+}
+
+/**
+ * Algunos modelos abiertos razonan por defecto y ese razonamiento cuenta
+ * como salida: con un tope bajo pueden agotarlo y devolver `content` vacío.
+ * Medido en Otari (2026-11-09) con un selector de docs:
+ *   - Qwen 3.5: solo `none` lo apaga (800 tokens sin respuesta → 12).
+ *   - gpt-oss: no admite apagarlo del todo; `low` lo reduce (248 → 55).
+ *   - Mistral Small: no razona; no se envía nada.
+ * Modelos no listados (incluidas las políticas de routing): no se envía.
+ */
+export function reasoningEffortFor(model: string): "none" | "low" | undefined {
+  const id = model.toLowerCase();
+  if (id.includes("qwen-3.5") || id.includes("qwen3.5")) return "none";
+  if (id.includes("gpt-oss")) return "low";
+  return undefined;
+}
+
 function toBudgetError(err: unknown): LlmBudgetExceededError | null {
   const e = err as { status?: number; headers?: Headers | Record<string, string> } | null;
   if (!e || e.status !== 403 || !e.headers) return null;
@@ -227,6 +254,7 @@ async function callOtari(opts: LlmCallOptions, model: string): Promise<LlmCallRe
 /** Claude vía Otari por la ruta Messages: conserva thinking y caché. */
 async function callOtariMessages(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
   const thinking = thinkingConfigFor(model);
+  const endUser = otariEndUser(opts);
   const { data, response } = await otariAnthropic()
     .messages.create(
       {
@@ -235,7 +263,7 @@ async function callOtariMessages(opts: LlmCallOptions, model: string): Promise<L
         ...(thinking ? { thinking } : {}),
         system: anthropicSystem(opts),
         messages: opts.messages,
-        ...(opts.endUserId ? { metadata: { user_id: opts.endUserId } } : {}),
+        ...(endUser ? { metadata: { user_id: endUser } } : {}),
       },
       { headers: otariHeaders(opts) }
     )
@@ -254,13 +282,16 @@ async function callOtariMessages(opts: LlmCallOptions, model: string): Promise<L
 
 /** Resto de modelos (abiertos, políticas de routing) por la ruta OpenAI. */
 async function callOtariChat(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {
+  const endUser = otariEndUser(opts);
+  const effort = reasoningEffortFor(model);
   const { data, response } = await otariOpenai()
     .chat.completions.create(
       {
         model,
         max_completion_tokens: opts.maxTokens,
+        ...(effort ? { reasoning_effort: effort } : {}),
         messages: [{ role: "system", content: opts.system }, ...opts.messages],
-        ...(opts.endUserId ? { user: opts.endUserId } : {}),
+        ...(endUser ? { user: endUser } : {}),
       },
       { headers: otariHeaders(opts) }
     )
