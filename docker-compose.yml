@@ -13,7 +13,7 @@ services:
       # defaults definidos en src/lib/llm-provider.ts (anthropic + Haiku 5.5 en
       # todos los tiers). Cambiar aquí + `docker compose restart app` para
       # alternar sin tocar código. Ver `.env.example` para opciones.
-      LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-anthropic}
+      LLM_DEFAULT_PROVIDER: ${LLM_DEFAULT_PROVIDER:-}
       LLM_MODEL_HAIKU_OPENAI: ${LLM_MODEL_HAIKU_OPENAI:-}
       LLM_MODEL_HAIKU_ANTHROPIC: ${LLM_MODEL_HAIKU_ANTHROPIC:-}
       LLM_MODEL_SONNET_OPENAI: ${LLM_MODEL_SONNET_OPENAI:-}

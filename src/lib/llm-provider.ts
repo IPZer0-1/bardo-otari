@@ -19,14 +19,15 @@ export const LLM_PROVIDER_COOKIE = "llm-provider";
 
 /**
  * Provider por defecto cuando no hay cookie. Se controla con la env var
- * LLM_DEFAULT_PROVIDER (anthropic | openai | otari). Por defecto "anthropic"
- * (Haiku 5.5 es más barato que cualquier opción vigente de OpenAI); en
- * desarrollo el toggle visual lo sobrescribe vía cookie.
+ * LLM_DEFAULT_PROVIDER (anthropic | openai | otari). Si no se fija, Otari
+ * cuando hay OTARI_API_KEY y, si no, "anthropic" (Haiku 5.5 es más barato
+ * que cualquier opción vigente de OpenAI). En desarrollo el toggle visual
+ * lo sobrescribe vía cookie.
  */
 function readDefaultProvider(): LlmProvider {
   const raw = process.env.LLM_DEFAULT_PROVIDER;
   if (isValidProvider(raw)) return raw;
-  return "anthropic";
+  return isOtariConfigured() ? "otari" : "anthropic";
 }
 
 export const DEFAULT_PROVIDER: LlmProvider = readDefaultProvider();

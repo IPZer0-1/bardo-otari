@@ -54,7 +54,7 @@ vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 vi.mock("@/db/app-settings", () => ({ getAppSetting: vi.fn() }));
 
 const { callLlm, LlmBudgetExceededError, reasoningEffortFor } = await import("../llm-call");
-const { isValidProvider, MODEL_IDS } = await import("../llm-provider");
+const { isValidProvider, MODEL_IDS, DEFAULT_PROVIDER } = await import("../llm-provider");
 // Algunos tests fuerzan un modelo anthropic:* en el tier sonnet; se restaura en beforeEach.
 const defaultOtariModels = [MODEL_IDS.haiku.otari, MODEL_IDS.sonnet.otari, MODEL_IDS.summary.otari];
 const defaultSonnetOtari = MODEL_IDS.sonnet.otari;
@@ -281,6 +281,21 @@ describe("callLlm · otari", () => {
     const boom = Object.assign(new Error("502"), { status: 502, headers: new Headers() });
     openaiCreate.mockImplementation(() => ({ withResponse: () => Promise.reject(boom) }));
     await expect(callLlm({ ...base, provider: "otari", tier: "haiku" })).rejects.toBe(boom);
+  });
+});
+
+describe("provider por defecto", () => {
+  it("con OTARI_API_KEY y sin LLM_DEFAULT_PROVIDER es otari", () => {
+    expect(DEFAULT_PROVIDER).toBe("otari");
+  });
+
+  it("sin OTARI_API_KEY vuelve a anthropic", async () => {
+    const saved = process.env.OTARI_API_KEY;
+    delete process.env.OTARI_API_KEY;
+    vi.resetModules();
+    const fresh = await import("../llm-provider");
+    expect(fresh.DEFAULT_PROVIDER).toBe("anthropic");
+    process.env.OTARI_API_KEY = saved;
   });
 });
 

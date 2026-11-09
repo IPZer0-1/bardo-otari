@@ -58,9 +58,9 @@ Plantilla completa de variables en [.env.example](.env.example). Resumen:
 - `NEXTAUTH_SECRET` — `openssl rand -base64 32`
 - `OPENAI_API_KEY` y/o `ANTHROPIC_API_KEY` — al menos la del provider activo
 
-**Provider y modelos** (todas opcionales, default Anthropic con `claude-haiku-5-5` en todos los tiers; alternativa OpenAI `gpt-5.6-luna`):
+**Provider y modelos** (todas opcionales). Con `OTARI_API_KEY` el default es Otari con modelos abiertos; sin ella, Anthropic con `claude-haiku-5-5` en todos los tiers. Alternativa: OpenAI `gpt-5.6-luna`.
 
-- `LLM_DEFAULT_PROVIDER` — `anthropic` (default) | `openai`. Respaldo: si un admin elige provider en `/admin/models`, manda esa elección
+- `LLM_DEFAULT_PROVIDER` — `otari` | `anthropic` | `openai`. Si se omite: `otari` cuando hay `OTARI_API_KEY`, si no `anthropic`. Respaldo: si un admin elige provider en `/admin/models`, manda esa elección
 - `LLM_MODEL_HAIKU_OPENAI`, `LLM_MODEL_SONNET_OPENAI`, `LLM_MODEL_SUMMARY_OPENAI` — IDs de modelo OpenAI por tier
 - `LLM_MODEL_HAIKU_ANTHROPIC`, `LLM_MODEL_SONNET_ANTHROPIC`, `LLM_MODEL_SUMMARY_ANTHROPIC` — IDs de modelo Anthropic por tier
 
