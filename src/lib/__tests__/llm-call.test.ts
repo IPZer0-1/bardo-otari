@@ -154,7 +154,7 @@ describe("callLlm · otari", () => {
     openaiCreate.mockImplementation(() =>
       apiPromise(
         openaiCompletion({
-          usage: { prompt_tokens: 7, completion_tokens: 4, cost_usd: 0.0012 },
+          usage: { prompt_tokens: 7, completion_tokens: 4, cost_usd: "0.0012" },
         }),
         { "Otari-Provider": "deepinfra", "Otari-Model": "mistral-small-4", "Otari-Fallback": "false" }
       )

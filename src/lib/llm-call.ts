@@ -189,9 +189,11 @@ function servedModel(headers: Headers, requested: string): string {
   return provider ? `${provider}:${served}` : served;
 }
 
+/** Otari devuelve `cost_usd` como string decimal ("0.000135"); aceptamos ambos. */
 function readCostUsd(usage: unknown): number | undefined {
   const cost = (usage as { cost_usd?: unknown } | null | undefined)?.cost_usd;
-  return typeof cost === "number" ? cost : undefined;
+  const n = typeof cost === "string" ? Number(cost) : cost;
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined;
 }
 
 function toBudgetError(err: unknown): LlmBudgetExceededError | null {
