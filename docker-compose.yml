@@ -20,12 +20,13 @@ services:
       LLM_MODEL_SONNET_ANTHROPIC: ${LLM_MODEL_SONNET_ANTHROPIC:-}
       LLM_MODEL_SUMMARY_OPENAI: ${LLM_MODEL_SUMMARY_OPENAI:-}
       LLM_MODEL_SUMMARY_ANTHROPIC: ${LLM_MODEL_SUMMARY_ANTHROPIC:-}
-      # Otari (gateway opcional, docs/otari.md). Sin OTARI_API_KEY la opción
-      # no aparece y la app funciona igual que sin Otari.
+      # Otari (docs/otari.md). Con OTARI_API_KEY es el provider por defecto;
+      # sin ella la opción no aparece y la app funciona igual que sin Otari.
       OTARI_API_KEY: ${OTARI_API_KEY:-}
       OTARI_BASE_URL: ${OTARI_BASE_URL:-}
       OTARI_SERVICE_KEY: ${OTARI_SERVICE_KEY:-}
       OTARI_REASONING_EFFORT: ${OTARI_REASONING_EFFORT:-}
+      OTARI_GUARDRAIL_ALERT_SCORE: ${OTARI_GUARDRAIL_ALERT_SCORE:-}
       LLM_MODEL_HAIKU_OTARI: ${LLM_MODEL_HAIKU_OTARI:-}
       LLM_MODEL_SONNET_OTARI: ${LLM_MODEL_SONNET_OTARI:-}
       LLM_MODEL_SUMMARY_OTARI: ${LLM_MODEL_SUMMARY_OTARI:-}

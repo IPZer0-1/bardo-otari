@@ -2,6 +2,18 @@
 
 Aplicación web para campañas de rol que convierte notas de sesión en documentación viva y permite consultarla por chat.
 
+## Otari integration (Mozilla.ai hackathon)
+
+Bardo runs on [Otari](https://otari.ai), the LLM gateway by Mozilla.ai, using open-weight models only:
+
+- **Three open models, three roles:** Mistral Small 4 answers chat questions, gpt-oss-120b folds session notes into the wiki as strict JSON patches, and gpt-oss-20b picks the relevant docs and summarises chat history.
+- **Routing policies with fallbacks** for each role. Bardo records the model that actually answered.
+- **Workspace budget plus per-player budgets.** Each player is an Otari end user with a daily dollar cap, on top of Bardo's own monthly "gold coins". A budget refusal never charges coins and tells the player when they can continue.
+- **Prompt-injection guardrail in monitor mode.** Uploaded notes are scored, and suspicious ones are flagged to the game master.
+- **Real cost per operation** (`cost_usd`) stored next to its gold-coin price.
+
+Details, configuration and measurements: [docs/otari.md](docs/otari.md). First commit with Otari: [`otari-first`](https://github.com/IPZer0-1/bardo-otari/commit/e5e4d1272df65c8c8678dde49cbe984438068c7d).
+
 ## Qué hace ahora mismo
 
 - Registro por código de invitación (single-use) y login con email/contraseña.
@@ -18,14 +30,14 @@ Aplicación web para campañas de rol que convierte notas de sesión en document
 - Next.js App Router (16.x) + React 19
 - PostgreSQL 16
 - NextAuth Credentials (sesiones)
-- OpenAI API (default en prod) y Anthropic Claude API (alternativo). Toggle dev por cookie. Modelos por env var.
+- Otari (gateway de Mozilla.ai, modelos abiertos) por defecto si hay `OTARI_API_KEY`; Anthropic y OpenAI directos como alternativa. Toggle dev por cookie. Modelos por env var.
 - Docker Compose
 
 ## Flujo principal
 
 1. Un usuario sube notas de sesión.
 2. El backend extrae texto si hace falta y carga los documentos actuales de la campaña.
-3. Claude propone cambios sobre la documentación y posibles conflictos.
+3. El LLM propone cambios sobre la documentación y posibles conflictos.
 4. Los documentos actualizados se guardan en `campaign_docs`.
 5. Los jugadores consultan la campaña desde el chat y reciben respuestas basadas en esos documentos.
 
@@ -63,6 +75,7 @@ Plantilla completa de variables en [.env.example](.env.example). Resumen:
 - `LLM_DEFAULT_PROVIDER` — `otari` | `anthropic` | `openai`. Si se omite: `otari` cuando hay `OTARI_API_KEY`, si no `anthropic`. Respaldo: si un admin elige provider en `/admin/models`, manda esa elección
 - `LLM_MODEL_HAIKU_OPENAI`, `LLM_MODEL_SONNET_OPENAI`, `LLM_MODEL_SUMMARY_OPENAI` — IDs de modelo OpenAI por tier
 - `LLM_MODEL_HAIKU_ANTHROPIC`, `LLM_MODEL_SONNET_ANTHROPIC`, `LLM_MODEL_SUMMARY_ANTHROPIC` — IDs de modelo Anthropic por tier
+- `OTARI_*` y `LLM_MODEL_*_OTARI` — ver [docs/otari.md](docs/otari.md#configuration)
 
 **Cuota mensual por usuario:**
 
@@ -92,5 +105,6 @@ npm run dev
 
 - `src/app/` rutas y UI
 - `src/app/api/` endpoints de auth, campañas, query e ingesta
-- `src/lib/claude.ts` integración con Claude
+- `src/lib/claude.ts` prompts y flujos LLM (consulta, ingesta, router)
+- `src/lib/llm-call.ts` llamada única a los providers (Otari, Anthropic, OpenAI)
 - `src/db/` schema, migraciones y helpers de acceso a datos
