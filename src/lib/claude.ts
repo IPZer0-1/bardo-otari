@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { CampaignDoc } from "@/db/docs";
-import { callLlm, extractText, thinkingConfigFor } from "./llm-call";
+import { callLlm, extractText, thinkingConfigFor, type GuardrailVerdict } from "./llm-call";
+import { maxGuardrailScore } from "./guardrails";
 import { MODEL_IDS, type LlmProvider } from "./llm-provider";
 
 let _client: Anthropic | undefined;
@@ -112,6 +113,8 @@ export interface IngestRouterResult {
   routerModel: string;
   /** Coste real del router (solo vía Otari). */
   routerCostUsd?: number;
+  /** Veredictos de guardrails sobre la llamada del router (solo vía Otari). */
+  routerGuardrails?: GuardrailVerdict[];
 }
 
 /**
@@ -179,6 +182,7 @@ Devuelve SOLO un array JSON con los file_paths de los documentos existentes que 
       routerOutputTokens: response.outputTokens,
       routerModel: response.model,
       routerCostUsd: response.costUsd,
+      routerGuardrails: response.guardrails,
     };
   } catch {
     return null;
@@ -220,6 +224,8 @@ export interface IngestResult {
   cache_read_tokens: number;
   /** Coste real en USD (router + llamada principal); null si no se informa. */
   cost_usd: number | null;
+  /** Puntuación máxima del guardrail de Otari; null si no se evaluó. */
+  guardrail_score: number | null;
 }
 
 /**
@@ -459,6 +465,7 @@ export async function ingestNotes(
     cache_creation_tokens: response.cacheCreationTokens,
     cache_read_tokens: response.cacheReadTokens,
     cost_usd: sumCosts(response.costUsd, router?.routerCostUsd),
+    guardrail_score: maxGuardrailScore(response.guardrails, router?.routerGuardrails),
   };
 }
 
@@ -536,6 +543,7 @@ export async function ingestCorrection(
     cache_creation_tokens: response.cacheCreationTokens,
     cache_read_tokens: response.cacheReadTokens,
     cost_usd: sumCosts(response.costUsd, router?.routerCostUsd),
+    guardrail_score: maxGuardrailScore(response.guardrails, router?.routerGuardrails),
   };
 }
 
@@ -626,6 +634,7 @@ export async function checkBatchIngest(
         cache_read_tokens: response.usage.cache_read_input_tokens ?? 0,
         // Batch es Anthropic directo: no hay coste del gateway.
         cost_usd: null,
+        guardrail_score: null,
       },
     };
   } catch {

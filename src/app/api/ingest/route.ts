@@ -24,6 +24,8 @@ import {
 } from "@/lib/quota";
 import pool from "@/db/client";
 import { insertUsageLog } from "@/db/usage-logs";
+import { recordGuardrailScore } from "@/db/upload-guardrail";
+import { isGuardrailAlert } from "@/lib/guardrails";
 
 type IngestKind = "session" | "correction" | "entity" | "auto";
 const VALID_KINDS: IngestKind[] = ["session", "correction", "entity", "auto"];
@@ -232,6 +234,7 @@ export async function POST(req: Request) {
 
     if (effectiveKind === "correction") {
       const result = await ingestCorrection(docs, trimmedText, metadata, provider, session.user.id);
+      await recordGuardrailScore(uploadId, result.guardrail_score);
 
       if (VALIDATION_ENABLED) {
         const validation = validatePostIngest(result.updates);
@@ -276,6 +279,7 @@ export async function POST(req: Request) {
         mode: "correction",
         updated_files: uniqueFilePaths(result.updates.map((u) => u.file_path)),
         conflicts: result.conflicts.length,
+        guardrail_alert: isGuardrailAlert(result.guardrail_score),
       });
     }
 
@@ -301,6 +305,7 @@ export async function POST(req: Request) {
     }
 
     const result = await ingestNotes(docs, trimmedText, metadata, provider, session.user.id);
+    await recordGuardrailScore(uploadId, result.guardrail_score);
 
     if (VALIDATION_ENABLED) {
       const validation = validatePostIngest(result.updates);
@@ -352,6 +357,7 @@ export async function POST(req: Request) {
       mode: "sync",
       updated_files: uniqueFilePaths(result.updates.map((u) => u.file_path)),
       conflicts: result.conflicts.length,
+      guardrail_alert: isGuardrailAlert(result.guardrail_score),
     });
   } catch (err) {
     if (uploadId) {

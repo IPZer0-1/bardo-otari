@@ -14,6 +14,8 @@ interface SyncIngestResult {
   mode: "sync" | "correction" | "entity";
   updated_files: string[];
   conflicts: number;
+  /** El guardrail de Otari vio posibles instrucciones para la IA. */
+  guardrail_alert?: boolean;
 }
 
 interface BatchIngestResult {
@@ -190,6 +192,12 @@ export default function UploadPage({ params }: { params: Promise<{ id: string }>
             {result.conflicts > 0 && (
               <p className="text-amber-400 text-xs mt-2">
                 ⚠ {result.conflicts} discrepancia{result.conflicts > 1 ? "s" : ""} registrada{result.conflicts > 1 ? "s" : ""} con versiones anteriores.
+              </p>
+            )}
+            {result.guardrail_alert && (
+              <p className="text-amber-400 text-xs mt-2 leading-relaxed">
+                ⚠ Esta nota parece contener instrucciones dirigidas a la IA. Se ha
+                integrado igualmente, pero el máster la verá marcada para revisarla.
               </p>
             )}
           </div>

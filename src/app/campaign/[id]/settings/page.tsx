@@ -24,6 +24,15 @@ interface Campaign {
   can_edit: boolean;
 }
 
+interface FlaggedUpload {
+  id: string;
+  created_at: string;
+  author: string;
+  filename: string | null;
+  score: number;
+  excerpt: string;
+}
+
 const ROLE_LABEL: Record<string, string> = { creator: "Creador", master: "Master", player: "Jugador" };
 
 export default function SettingsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +44,7 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
   const [myRole, setMyRole] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [flagged, setFlagged] = useState<FlaggedUpload[]>([]);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -63,6 +73,13 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
       setMyRole(c.role);
       setMembers(membersData.members || []);
       setLoading(false);
+
+      if (c.role === "creator" || c.role === "master") {
+        fetch(`/api/campaigns/${campaignId}/flagged-uploads`)
+          .then((r) => (r.ok ? r.json() : { uploads: [] }))
+          .then((d) => setFlagged(d.uploads || []))
+          .catch(() => {});
+      }
     });
   }, [status, campaignId, router]);
 
@@ -201,6 +218,42 @@ export default function SettingsPage({ params }: { params: Promise<{ id: string 
                   </div>
                 );
               })}
+            </div>
+          </section>
+        )}
+
+        {/* Notas marcadas por el guardrail de Otari — solo creator y master */}
+        {isManager && flagged.length > 0 && (
+          <section>
+            <h2 className="text-zinc-400 text-xs uppercase tracking-widest mb-1">
+              Notas a revisar ({flagged.length})
+            </h2>
+            <p className="text-zinc-600 text-xs mb-3 leading-relaxed">
+              Estas notas parecen contener instrucciones dirigidas a la IA (posible
+              &quot;prompt injection&quot;). Se integraron igualmente: revisa que los
+              documentos de la campaña no hayan cambiado de forma extraña.
+            </p>
+            <div className="space-y-2">
+              {flagged.map((f) => (
+                <div key={f.id} className="bg-zinc-900 border border-amber-900/60 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-zinc-300 truncate">
+                      {f.author}
+                      {f.filename && <span className="text-zinc-600"> · {f.filename}</span>}
+                    </span>
+                    <span className="text-zinc-500 shrink-0">
+                      {new Date(f.created_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}
+                      {" · "}
+                      <span className="text-amber-400" title="Puntuación del detector (0 = limpia, 1 = inyección)">
+                        {f.score.toFixed(2)}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="text-zinc-400 text-xs mt-2 whitespace-pre-wrap break-words line-clamp-4">
+                    {f.excerpt}
+                  </p>
+                </div>
+              ))}
             </div>
           </section>
         )}
