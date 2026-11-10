@@ -103,7 +103,7 @@ export default function DocsPage({ params }: { params: Promise<{ id: string }> }
             <div className="text-center py-16 text-zinc-600">
               <p className="text-3xl mb-3">📂</p>
               <p className="text-sm">No hay documentos todavía.</p>
-              <p className="text-xs mt-1">Sube notas para que Claude genere la documentación.</p>
+              <p className="text-xs mt-1">Sube notas para que Bardo genere la documentación.</p>
             </div>
           ) : (
             <div className="space-y-2">

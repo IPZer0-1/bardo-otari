@@ -3,6 +3,11 @@ import { Cinzel, Inter } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
 import DevModelToggle from "@/components/DevModelToggle";
+import { getCurrentProvider, isValidProvider } from "@/lib/llm-provider";
+
+// El selector de provider solo existe en desarrollo; en producción no se
+// consulta nada aquí y el layout sigue siendo estático.
+const isDev = process.env.NODE_ENV === "development";
 
 const cinzel = Cinzel({
   variable: "--font-cinzel",
@@ -20,7 +25,7 @@ export const metadata: Metadata = {
   description: "Consulta y gestión de notas para campañas de rol",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -29,7 +34,7 @@ export default function RootLayout({
     <html lang="es" className={`${cinzel.variable} ${inter.variable} h-full`}>
       <body className="min-h-full bg-black text-zinc-100 antialiased">
         <SessionProvider>{children}</SessionProvider>
-        <DevModelToggle />
+        {isDev && <DevModelToggle current={await getCurrentProvider()} otariAvailable={isValidProvider("otari")} />}
       </body>
     </html>
   );

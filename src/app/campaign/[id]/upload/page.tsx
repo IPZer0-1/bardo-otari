@@ -171,7 +171,7 @@ export default function UploadPage({ params }: { params: Promise<{ id: string }>
 
       <main className="max-w-lg mx-auto px-4 py-6">
         <p className="text-zinc-500 text-sm mb-6">
-          Escribe o sube tus notas de sesión. Claude las integrará en la documentación de la campaña.
+          Escribe o sube tus notas de sesión. Bardo las integrará en la documentación de la campaña.
         </p>
 
         {result && result.status === "done" && (
