@@ -109,6 +109,8 @@ export default function TermsPage() {
               00:00 de tu zona horaria local. Si lo agotas, las operaciones serán
               bloqueadas con un mensaje informativo hasta el siguiente reinicio. La
               tarifa concreta y el tope pueden ajustarse durante la fase piloto.
+              Puede aplicarse además un límite diario de uso por cuenta para evitar
+              abusos; las operaciones que bloquea no descuentan monedas.
             </p>
           </section>
 

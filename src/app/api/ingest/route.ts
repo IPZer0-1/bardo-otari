@@ -23,6 +23,7 @@ import {
   type LlmOperation,
 } from "@/lib/quota";
 import pool from "@/db/client";
+import { insertUsageLog } from "@/db/usage-logs";
 
 type IngestKind = "session" | "correction" | "entity" | "auto";
 const VALID_KINDS: IngestKind[] = ["session", "correction", "entity", "auto"];
@@ -258,19 +259,17 @@ export async function POST(req: Request) {
         await recordIngestedNote(campaignId, contentHash, uploadId ?? null);
       }
 
-      pool.query(
-        `INSERT INTO usage_logs (user_id, campaign_id, operation, token_count, cache_creation_tokens, cache_read_tokens, model, gold_cost)
-         VALUES ($1, $2, 'ingest_correction', $3, $4, $5, $6, $7)`,
-        [
-          session.user.id,
-          campaignId,
-          result.input_tokens + result.output_tokens,
-          result.cache_creation_tokens,
-          result.cache_read_tokens,
-          result.model,
-          GOLD_COSTS.ingest_correction,
-        ]
-      ).catch(() => {});
+      insertUsageLog({
+        userId: session.user.id,
+        campaignId: campaignId,
+        operation: "ingest_correction",
+        tokenCount: result.input_tokens + result.output_tokens,
+        cacheCreationTokens: result.cache_creation_tokens,
+        cacheReadTokens: result.cache_read_tokens,
+        model: result.model,
+        goldCost: GOLD_COSTS.ingest_correction,
+        costUsd: result.cost_usd,
+      }).catch(() => {});
 
       return NextResponse.json({
         status: "done",
@@ -336,19 +335,17 @@ export async function POST(req: Request) {
 
     // Registrar uso. quotaOp aquí es "ingest_short" o "ingest_long" según
     // el tier que claude.ts haya elegido (mismo criterio que el pre-check).
-    pool.query(
-      `INSERT INTO usage_logs (user_id, campaign_id, operation, token_count, cache_creation_tokens, cache_read_tokens, model, gold_cost)
-       VALUES ($1, $2, 'ingest', $3, $4, $5, $6, $7)`,
-      [
-        session.user.id,
-        campaignId,
-        result.input_tokens + result.output_tokens,
-        result.cache_creation_tokens,
-        result.cache_read_tokens,
-        result.model,
-        GOLD_COSTS[quotaOp],
-      ]
-    ).catch(() => {});
+    insertUsageLog({
+      userId: session.user.id,
+      campaignId: campaignId,
+      operation: "ingest",
+      tokenCount: result.input_tokens + result.output_tokens,
+      cacheCreationTokens: result.cache_creation_tokens,
+      cacheReadTokens: result.cache_read_tokens,
+      model: result.model,
+      goldCost: GOLD_COSTS[quotaOp],
+      costUsd: result.cost_usd,
+    }).catch(() => {});
 
     return NextResponse.json({
       status: "done",
@@ -361,7 +358,10 @@ export async function POST(req: Request) {
       await pool.query(`UPDATE uploads SET status = 'failed' WHERE id = $1`, [uploadId]);
     }
     if (err instanceof LlmBudgetExceededError) {
-      return NextResponse.json(buildGatewayBudgetResponse(), { status: 429 });
+      return NextResponse.json(buildGatewayBudgetResponse(err), {
+        status: 429,
+        headers: err.retryAfterSec != null ? { "Retry-After": String(err.retryAfterSec) } : undefined,
+      });
     }
     const message = err instanceof Error ? err.message : String(err);
     console.error("Ingest error:", message);

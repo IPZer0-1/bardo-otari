@@ -91,7 +91,11 @@ export interface GuardrailVerdict {
  * traducen a un mensaje para el jugador.
  */
 export class LlmBudgetExceededError extends Error {
-  constructor(public readonly scope: string | null) {
+  constructor(
+    public readonly scope: string | null,
+    /** Segundos hasta que se repone el presupuesto (`Retry-After`), si llega. */
+    public readonly retryAfterSec: number | null = null,
+  ) {
     super(`Presupuesto del gateway agotado${scope ? ` (${scope})` : ""}`);
     this.name = "LlmBudgetExceededError";
   }
@@ -273,7 +277,11 @@ function toBudgetError(err: unknown): LlmBudgetExceededError | null {
       ? (e.headers as Headers).get(name)
       : ((e.headers as Record<string, string>)[name] ?? null);
   if (get("otari-error-code") !== "budget_exceeded") return null;
-  return new LlmBudgetExceededError(get("otari-budget-scope"));
+  const retry = Number.parseInt(get("retry-after") ?? "", 10);
+  return new LlmBudgetExceededError(
+    get("otari-budget-scope"),
+    Number.isFinite(retry) && retry >= 0 ? retry : null,
+  );
 }
 
 async function callOtari(opts: LlmCallOptions, model: string): Promise<LlmCallResult> {

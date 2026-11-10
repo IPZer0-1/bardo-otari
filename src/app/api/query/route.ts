@@ -18,7 +18,7 @@ import {
   saveMessages,
 } from "@/db/conversations";
 import { getCachedAnswer, cacheAnswer, computeDocsVersion } from "@/db/query-cache";
-import pool from "@/db/client";
+import { insertUsageLog } from "@/db/usage-logs";
 
 export async function POST(req: Request) {
   const session = await auth();
@@ -76,7 +76,10 @@ export async function POST(req: Request) {
     result = await queryCampaign(docs, question.trim(), historyMessages, provider, session.user.id);
   } catch (err) {
     if (err instanceof LlmBudgetExceededError) {
-      return NextResponse.json(buildGatewayBudgetResponse(), { status: 429 });
+      return NextResponse.json(buildGatewayBudgetResponse(err), {
+        status: 429,
+        headers: err.retryAfterSec != null ? { "Retry-After": String(err.retryAfterSec) } : undefined,
+      });
     }
     throw err;
   }
@@ -87,19 +90,17 @@ export async function POST(req: Request) {
 
   await saveMessages(convId, question.trim(), result.answer);
 
-  pool.query(
-    `INSERT INTO usage_logs (user_id, campaign_id, operation, token_count, cache_creation_tokens, cache_read_tokens, model, gold_cost)
-     VALUES ($1, $2, 'query', $3, $4, $5, $6, $7)`,
-    [
-      session.user.id,
-      campaign_id,
-      result.input_tokens + result.output_tokens,
-      result.cache_creation_tokens,
-      result.cache_read_tokens,
-      result.model,
-      GOLD_COSTS.query,
-    ]
-  ).catch(() => {});
+  insertUsageLog({
+    userId: session.user.id,
+    campaignId: campaign_id,
+    operation: "query",
+    tokenCount: result.input_tokens + result.output_tokens,
+    cacheCreationTokens: result.cache_creation_tokens,
+    cacheReadTokens: result.cache_read_tokens,
+    model: result.model,
+    goldCost: GOLD_COSTS.query,
+    costUsd: result.cost_usd,
+  }).catch(() => {});
 
   return NextResponse.json({ answer: result.answer, conversation_id: convId });
 }

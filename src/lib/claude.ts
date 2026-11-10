@@ -36,6 +36,19 @@ Reglas:
 ${sections}`;
 }
 
+/**
+ * Suma el coste real (USD) de las llamadas de una operación. Queda en null
+ * si ninguna llamada lo informa (providers directos).
+ */
+export interface CostTally {
+  usd: number | null;
+}
+
+function addCost(tally: CostTally | undefined, costUsd: number | undefined): void {
+  if (!tally || costUsd === undefined) return;
+  tally.usd = (tally.usd ?? 0) + costUsd;
+}
+
 // Selecciona los docs relevantes para una pregunta usando un modelo barato
 // como clasificador. Siempre incluye los ANCHOR_DOCS. Si falla, devuelve
 // null → el llamador hace fallback a todos los docs.
@@ -43,7 +56,8 @@ export async function selectRelevantDocs(
   docs: CampaignDoc[],
   question: string,
   provider: LlmProvider,
-  endUserId?: string
+  endUserId?: string,
+  tally?: CostTally
 ): Promise<CampaignDoc[] | null> {
   // Con pocos docs no vale la pena clasificar
   if (docs.length <= 4) return docs;
@@ -69,6 +83,7 @@ Devuelve SOLO un array JSON con los file_paths de los documentos necesarios para
       endUserId,
       tag: "query_router",
     });
+    addCost(tally, response.costUsd);
 
     const match = response.text.match(/\[[\s\S]*\]/);
     if (!match) return null;
@@ -95,6 +110,8 @@ export interface IngestRouterResult {
   routerOutputTokens: number;
   /** Modelo concreto que ejecutó el router. */
   routerModel: string;
+  /** Coste real del router (solo vía Otari). */
+  routerCostUsd?: number;
 }
 
 /**
@@ -161,6 +178,7 @@ Devuelve SOLO un array JSON con los file_paths de los documentos existentes que 
       routerInputTokens: response.inputTokens,
       routerOutputTokens: response.outputTokens,
       routerModel: response.model,
+      routerCostUsd: response.costUsd,
     };
   } catch {
     return null;
@@ -200,6 +218,8 @@ export interface IngestResult {
   output_tokens: number;
   cache_creation_tokens: number;
   cache_read_tokens: number;
+  /** Coste real en USD (router + llamada principal); null si no se informa. */
+  cost_usd: number | null;
 }
 
 /**
@@ -438,7 +458,14 @@ export async function ingestNotes(
     output_tokens: response.outputTokens + (router?.routerOutputTokens ?? 0),
     cache_creation_tokens: response.cacheCreationTokens,
     cache_read_tokens: response.cacheReadTokens,
+    cost_usd: sumCosts(response.costUsd, router?.routerCostUsd),
   };
+}
+
+function sumCosts(...costs: (number | undefined)[]): number | null {
+  const tally: CostTally = { usd: null };
+  for (const c of costs) addCost(tally, c);
+  return tally.usd;
 }
 
 // --- Ruta "correction" (medida c) ---
@@ -508,6 +535,7 @@ export async function ingestCorrection(
     output_tokens: response.outputTokens + (router?.routerOutputTokens ?? 0),
     cache_creation_tokens: response.cacheCreationTokens,
     cache_read_tokens: response.cacheReadTokens,
+    cost_usd: sumCosts(response.costUsd, router?.routerCostUsd),
   };
 }
 
@@ -596,6 +624,8 @@ export async function checkBatchIngest(
         output_tokens: response.usage.output_tokens,
         cache_creation_tokens: response.usage.cache_creation_input_tokens ?? 0,
         cache_read_tokens: response.usage.cache_read_input_tokens ?? 0,
+        // Batch es Anthropic directo: no hay coste del gateway.
+        cost_usd: null,
       },
     };
   } catch {
@@ -612,7 +642,8 @@ const RECENT_MESSAGES_COUNT = 4; // Mensajes recientes que se envían completos
 async function summarizeHistory(
   messages: { role: "user" | "assistant"; content: string }[],
   provider: LlmProvider,
-  endUserId?: string
+  endUserId?: string,
+  tally?: CostTally
 ): Promise<string> {
   const transcript = messages
     .map((m) => `${m.role === "user" ? "Jugador" : "Asistente"}: ${m.content}`)
@@ -632,6 +663,7 @@ async function summarizeHistory(
     endUserId,
     tag: "history_summary",
   });
+  addCost(tally, response.costUsd);
 
   return response.text;
 }
@@ -643,7 +675,8 @@ async function summarizeHistory(
 export async function prepareHistory(
   messages: { role: "user" | "assistant"; content: string }[],
   provider: LlmProvider,
-  endUserId?: string
+  endUserId?: string,
+  tally?: CostTally
 ): Promise<{ role: "user" | "assistant"; content: string }[]> {
   if (messages.length <= SUMMARY_THRESHOLD) {
     return messages;
@@ -652,7 +685,7 @@ export async function prepareHistory(
   const oldMessages = messages.slice(0, -RECENT_MESSAGES_COUNT);
   const recentMessages = messages.slice(-RECENT_MESSAGES_COUNT);
 
-  const summary = await summarizeHistory(oldMessages, provider, endUserId);
+  const summary = await summarizeHistory(oldMessages, provider, endUserId, tally);
 
   return [
     { role: "user", content: `[Resumen de la conversación anterior: ${summary}]` },
@@ -668,6 +701,8 @@ export interface QueryResult {
   cache_creation_tokens: number;
   cache_read_tokens: number;
   model: string;
+  /** Coste real en USD (router + historial + respuesta); null si no se informa. */
+  cost_usd: number | null;
 }
 
 export async function queryCampaign(
@@ -687,12 +722,14 @@ export async function queryCampaign(
       cache_creation_tokens: 0,
       cache_read_tokens: 0,
       model: "none",
+      cost_usd: null,
     };
   }
 
-  const selectedDocs = (await selectRelevantDocs(docs, question, provider, endUserId)) ?? docs;
+  const tally: CostTally = { usd: null };
+  const selectedDocs = (await selectRelevantDocs(docs, question, provider, endUserId, tally)) ?? docs;
   const systemPrompt = buildSystemPrompt(selectedDocs);
-  const preparedHistory = await prepareHistory(history, provider, endUserId);
+  const preparedHistory = await prepareHistory(history, provider, endUserId, tally);
 
   const response = await callLlm({
     provider,
@@ -704,6 +741,7 @@ export async function queryCampaign(
     endUserId,
     tag: "query",
   });
+  addCost(tally, response.costUsd);
 
   return {
     answer: response.text,
@@ -712,5 +750,6 @@ export async function queryCampaign(
     cache_creation_tokens: response.cacheCreationTokens,
     cache_read_tokens: response.cacheReadTokens,
     model: response.model,
+    cost_usd: tally.usd,
   };
 }

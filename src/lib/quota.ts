@@ -128,18 +128,42 @@ export async function ensureQuota(
   return { used, cost, cap: MONTHLY_GOLD_CAP, timezone, resetAt };
 }
 
+/** Scopes de Otari que corresponden al presupuesto propio del jugador. */
+const PLAYER_BUDGET_SCOPES = new Set(["user", "end_user"]);
+
+/** "en unos 5 minutos", "en unas 3 horas"… a partir de `Retry-After`. */
+function formatRetryAfter(sec: number): string {
+  if (sec < 90) return "en un minuto";
+  const min = Math.round(sec / 60);
+  if (min < 90) return `en unos ${min} minutos`;
+  const h = Math.round(min / 60);
+  return h === 1 ? "en una hora" : `en unas ${h} horas`;
+}
+
 /**
  * Mensaje 429 cuando corta el presupuesto del gateway (Otari) en vez de
- * nuestras monedas. Es una red de seguridad: con la cuota bien calibrada
- * no debería verse. No se cobran monedas (el log solo se escribe al
- * terminar bien).
+ * nuestras monedas. Distingue el límite propio del jugador (scope `user`)
+ * del límite general de la app (workspace, key, organización…). No se
+ * cobran monedas (el log solo se escribe al terminar bien).
  */
-export function buildGatewayBudgetResponse() {
+export function buildGatewayBudgetResponse(err: {
+  scope: string | null;
+  retryAfterSec: number | null;
+}) {
+  const scope = err.scope ? (PLAYER_BUDGET_SCOPES.has(err.scope) ? "player" : "app") : "app";
+  const when = err.retryAfterSec != null ? formatRetryAfter(err.retryAfterSec) : null;
+  const error =
+    scope === "player"
+      ? "Has alcanzado tu límite personal de uso de IA. No se te han descontado monedas; " +
+        (when ? `podrás seguir ${when}.` : "se repone automáticamente.")
+      : "Se ha alcanzado el límite de gasto de IA de la aplicación. No se te han descontado monedas; " +
+        (when ? `inténtalo ${when}` : "inténtalo más tarde") +
+        " o avisa al administrador de la campaña.";
   return {
-    error:
-      "Se ha alcanzado el límite de gasto de IA. No se te han descontado monedas; " +
-      "inténtalo más tarde o avisa al administrador de la campaña.",
+    error,
     gateway_budget: true,
+    gateway_budget_scope: scope,
+    retry_after_sec: err.retryAfterSec,
   };
 }
 

@@ -281,12 +281,13 @@ describe("callLlm · otari", () => {
   it("traduce el 403 budget_exceeded a LlmBudgetExceededError", async () => {
     const budget = Object.assign(new Error("403"), {
       status: 403,
-      headers: new Headers({ "Otari-Error-Code": "budget_exceeded", "Otari-Budget-Scope": "end_user" }),
+      headers: new Headers({ "Otari-Error-Code": "budget_exceeded", "Otari-Budget-Scope": "user", "Retry-After": "3600" }),
     });
     openaiCreate.mockImplementation(() => ({ withResponse: () => Promise.reject(budget) }));
     const err = await callLlm({ ...base, provider: "otari", tier: "haiku" }).catch((e) => e);
     expect(err).toBeInstanceOf(LlmBudgetExceededError);
-    expect(err.scope).toBe("end_user");
+    expect(err.scope).toBe("user");
+    expect(err.retryAfterSec).toBe(3600);
   });
 
   it("otros errores se propagan tal cual", async () => {

@@ -186,6 +186,11 @@ export default function AccountPage() {
             por debajo de ~1000 palabras se cobra como nota corta; por encima, como
             nota larga. Las correcciones breves van siempre a la tarifa baja.
           </p>
+          <p className="text-zinc-600 text-xs mt-2 leading-relaxed">
+            Puede haber además un límite diario de uso para evitar abusos. Si lo
+            alcanzas, la operación se bloquea sin descontarte monedas y podrás
+            seguir cuando se reponga, normalmente al día siguiente.
+          </p>
         </section>
       </main>
     </div>
